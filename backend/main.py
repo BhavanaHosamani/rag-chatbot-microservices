@@ -24,7 +24,6 @@ api_key = os.getenv("OPENROUTER_API_KEY")
 os.environ["OPENAI_API_BASE"] = "https://openrouter.ai/api/v1"
 
 http_client = httpx.Client(
-    verify=False,
     timeout=120.0
 )
 
