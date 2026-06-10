@@ -1,8 +1,8 @@
 fastapi
 uvicorn
-langchain
-langchain-openai
-langchain-community
+langchain==0.1.20
+langchain-openai==0.1.7
+langchain-community==0.0.38
 langchain-text-splitters
 chromadb
 pydantic
