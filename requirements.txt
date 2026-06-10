@@ -9,3 +9,5 @@ pydantic
 httpx
 python-multipart
 openai
+streamlit
+requests
