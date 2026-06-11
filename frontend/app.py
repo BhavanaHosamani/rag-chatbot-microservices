@@ -52,7 +52,7 @@ def ask_question(question: str, pdf_name: str = None):
             json={
                 "question": question,
                 "chat_history": [],
-                "pdf_name": pdf_name   # None = all PDFs, or a specific name
+                "pdf_name": pdf_name
             },
             timeout=120
         )
@@ -82,21 +82,23 @@ def render_sidebar():
 
         if uploaded_file:
             if st.button("⬆️ Upload & Process"):
-                with st.spinner(f"Processing {uploaded_file.name}..."):
+                with st.spinner(f"Uploading {uploaded_file.name} to Supabase..."):
                     success, message = upload_pdf(uploaded_file)
                     if success:
                         st.success(message)
-                        # Refresh the list from backend
                         st.session_state["pdf_list"] = fetch_pdf_list()
                     else:
                         st.error(message)
 
         st.divider()
 
+        # ── Refresh button ───────────────────────
+        if st.button("🔄 Refresh PDF List"):
+            st.session_state["pdf_list"] = fetch_pdf_list()
+
         # ── Manage uploaded PDFs ─────────────────
         st.subheader("Your PDFs")
 
-        # Sync list from backend on first load
         if "pdf_list" not in st.session_state:
             st.session_state["pdf_list"] = fetch_pdf_list()
 
@@ -106,7 +108,6 @@ def render_sidebar():
             st.info("No PDFs uploaded yet.")
             st.session_state["selected_pdf"] = None
         else:
-            # Radio to select which PDF to query
             options = ["🔍 All PDFs"] + pdf_list
             selection = st.radio(
                 "Query from:",
@@ -133,7 +134,6 @@ def render_sidebar():
                             if success:
                                 st.success(msg)
                                 st.session_state["pdf_list"] = fetch_pdf_list()
-                                # Reset selection if deleted PDF was selected
                                 if st.session_state.get("selected_pdf") == pdf_name:
                                     st.session_state["selected_pdf"] = None
                                 st.rerun()
@@ -142,7 +142,9 @@ def render_sidebar():
 
         st.divider()
 
-        # ── Status indicator ─────────────────────
+        # ── Storage badge ────────────────────────
+        st.caption("☁️ PDFs stored in Supabase Storage")
+
         selected = st.session_state.get("selected_pdf")
         if pdf_list:
             if selected:
@@ -172,17 +174,13 @@ def handle_input(prompt):
 
     with st.chat_message("assistant"):
         with st.spinner("Thinking..."):
-            selected_pdf = st.session_state.get("selected_pdf")  # None or filename
+            selected_pdf = st.session_state.get("selected_pdf")
             answer, sources, mode, steps = ask_question(prompt, pdf_name=selected_pdf)
             st.markdown(answer)
 
-            # Show mode badge
             if mode == "pdf":
-                label = (
-                    f"📄 {selected_pdf}" if selected_pdf
-                    else "📚 All PDFs"
-                )
-                st.caption(f"Source: {label}")
+                label = f"📄 {selected_pdf}" if selected_pdf else "📚 All PDFs"
+                st.caption(f"Source: {label} · ☁️ Supabase Storage")
             else:
                 st.caption("⚡ General knowledge")
 
@@ -213,10 +211,6 @@ def main():
     prompt = st.chat_input("Ask anything...")
     if prompt:
         handle_input(prompt)
-
-# =========================
-# Run
-# =========================
 
 if __name__ == "__main__":
     main()

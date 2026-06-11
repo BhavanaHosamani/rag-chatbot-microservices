@@ -1,6 +1,7 @@
 import os
 import shutil
 import httpx
+import tempfile
 
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -13,9 +14,16 @@ from rag.embeddings import get_embeddings
 from rag.vector_store import create_vector_store
 from rag.tools import set_vector_store, search_pdf, get_pdf_list, delete_pdf_store
 from rag.agent import create_agent
+from rag.supabase_storage import (
+    upload_pdf_to_supabase,
+    download_pdf_from_supabase,
+    delete_pdf_from_supabase,
+    list_pdfs_from_supabase,
+)
 
 from langchain_openai import ChatOpenAI
 from langchain.schema import HumanMessage, SystemMessage
+from langchain_community.document_loaders import PyPDFLoader
 
 # =========================
 # OpenRouter Configuration
@@ -29,11 +37,13 @@ http_client = httpx.Client(timeout=120.0)
 # FastAPI App
 # =========================
 
-app = FastAPI(title="RAG Chatbot API", version="2.0.0")
+app = FastAPI(title="RAG Chatbot API", version="3.0.0")
+
 
 @app.get("/")
 async def home():
     return {"message": "RAG Chatbot API is running!", "status": "success"}
+
 
 app.add_middleware(
     CORSMiddleware,
@@ -57,13 +67,49 @@ llm = ChatOpenAI(
 )
 
 # =========================
+# Restore PDFs on startup
+# =========================
+
+@app.on_event("startup")
+async def restore_pdfs_on_startup():
+    """
+    On every Render restart, re-download all PDFs from Supabase
+    and rebuild their vector stores in memory.
+    """
+    print("🔄 Restoring PDFs from Supabase Storage...")
+    pdf_names = list_pdfs_from_supabase()
+
+    embeddings = get_embeddings()
+
+    for pdf_name in pdf_names:
+        try:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+                tmp_path = tmp.name
+
+            download_pdf_from_supabase(pdf_name, tmp_path)
+
+            loader = PyPDFLoader(tmp_path)
+            documents = loader.load()
+            chunks = split_documents(documents)
+            vector_store = create_vector_store(chunks, embeddings)
+            set_vector_store(pdf_name, vector_store)
+
+            os.unlink(tmp_path)
+            print(f"  ✅ Restored: {pdf_name}")
+        except Exception as e:
+            print(f"  ❌ Failed to restore {pdf_name}: {e}")
+
+    print(f"✅ Restored {len(pdf_names)} PDF(s) from Supabase.")
+
+# =========================
 # Request Models
 # =========================
 
 class QueryRequest(BaseModel):
     question: str
     chat_history: list = []
-    pdf_name: Optional[str] = None   # which PDF to query (None = query all)
+    pdf_name: Optional[str] = None
+
 
 # =========================
 # Upload PDF Endpoint
@@ -71,32 +117,37 @@ class QueryRequest(BaseModel):
 
 @app.post("/upload")
 async def upload_pdf(file: UploadFile = File(...)):
-    """Upload and process a single PDF. Each PDF gets its own vector store."""
+    """Upload PDF → save to Supabase Storage → build vector store in memory."""
 
-    os.makedirs("storage/documents", exist_ok=True)
+    # Read file bytes
+    file_bytes = await file.read()
 
-    # Save file to disk
-    file_path = f"storage/documents/{file.filename}"
-    with open(file_path, "wb") as f:
-        shutil.copyfileobj(file.file, f)
+    # 1. Upload to Supabase Storage
+    upload_pdf_to_supabase(file.filename, file_bytes)
 
-    # Load only this specific file
-    from langchain_community.document_loaders import PyPDFLoader
-    loader = PyPDFLoader(file_path)
+    # 2. Save to a temp file for processing
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+        tmp.write(file_bytes)
+        tmp_path = tmp.name
+
+    # 3. Build vector store
+    loader = PyPDFLoader(tmp_path)
     documents = loader.load()
-
     chunks = split_documents(documents)
     embeddings = get_embeddings()
     vector_store = create_vector_store(chunks, embeddings)
-
-    # Store under the PDF's filename
     set_vector_store(file.filename, vector_store)
+
+    # 4. Clean up temp file
+    os.unlink(tmp_path)
 
     return {
         "message": f"{file.filename} uploaded and processed successfully!",
         "pdf_name": file.filename,
-        "chunks": len(chunks)
+        "chunks": len(chunks),
+        "storage": "supabase"
     }
+
 
 # =========================
 # List PDFs Endpoint
@@ -104,8 +155,10 @@ async def upload_pdf(file: UploadFile = File(...)):
 
 @app.get("/pdfs")
 async def list_pdfs():
-    """Return all uploaded PDFs."""
-    return {"pdfs": get_pdf_list()}
+    """Return all PDFs stored in Supabase."""
+    pdfs = list_pdfs_from_supabase()
+    return {"pdfs": pdfs}
+
 
 # =========================
 # Delete PDF Endpoint
@@ -113,19 +166,18 @@ async def list_pdfs():
 
 @app.delete("/pdfs/{pdf_name}")
 async def delete_pdf(pdf_name: str):
-    """Delete a specific PDF and its vector store."""
+    """Delete PDF from Supabase Storage + remove its vector store from memory."""
 
-    # Remove from memory
-    deleted = delete_pdf_store(pdf_name)
+    # Remove from Supabase
+    deleted = delete_pdf_from_supabase(pdf_name)
     if not deleted:
-        raise HTTPException(status_code=404, detail=f"{pdf_name} not found.")
+        raise HTTPException(status_code=404, detail=f"{pdf_name} not found in storage.")
 
-    # Remove file from disk
-    file_path = f"storage/documents/{pdf_name}"
-    if os.path.exists(file_path):
-        os.remove(file_path)
+    # Remove from in-memory vector stores
+    delete_pdf_store(pdf_name)
 
     return {"message": f"{pdf_name} deleted successfully."}
+
 
 # =========================
 # Ask Question Endpoint
@@ -134,14 +186,16 @@ async def delete_pdf(pdf_name: str):
 @app.post("/ask")
 async def ask_question(request: QueryRequest):
     question = request.question
-    pdf_name = request.pdf_name  # frontend passes the selected PDF name
+    pdf_name = request.pdf_name
 
     context = search_pdf(question, pdf_name=pdf_name)
 
-    if context and context not in [
+    no_pdf_messages = [
         "No PDF uploaded yet. Please upload and process a PDF first.",
         "Selected PDF not found. Please re-upload.",
-    ]:
+    ]
+
+    if context and context not in no_pdf_messages:
         messages = [
             SystemMessage(content="""
 You are a highly knowledgeable AI assistant.
@@ -172,7 +226,6 @@ Provide a detailed answer.
         ]
 
         response = llm.invoke(messages)
-
         return {
             "answer": response.content,
             "mode": "pdf",
@@ -200,6 +253,7 @@ Provide a detailed answer.
             "steps": formatted_steps,
             "sources": []
         }
+
 
 # =========================
 # Run Locally

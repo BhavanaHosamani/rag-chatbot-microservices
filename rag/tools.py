@@ -32,29 +32,24 @@ def delete_pdf_store(pdf_name: str) -> bool:
 def search_pdf(query: str, pdf_name: Optional[str] = None) -> str:
     """
     Search across a specific PDF or all PDFs.
-
     - pdf_name=None  → search all uploaded PDFs and combine results
     - pdf_name="x"   → search only that PDF's vector store
     """
     global pdf_stores
 
-    # No PDFs uploaded at all
     if not pdf_stores:
         return "No PDF uploaded yet. Please upload and process a PDF first."
 
-    # Specific PDF requested but not found
     if pdf_name and pdf_name not in pdf_stores:
         return "Selected PDF not found. Please re-upload."
 
     targets = {pdf_name: pdf_stores[pdf_name]} if pdf_name else pdf_stores
 
     all_results = []
-
     for name, store in targets.items():
         docs = store.similarity_search(query, k=6)
         if docs:
             if len(targets) > 1:
-                # Label sections by source PDF when searching all
                 all_results.append(f"── From: {name} ──")
             for i, doc in enumerate(docs):
                 all_results.append(f"[Section {i+1}]:\n{doc.page_content}")
