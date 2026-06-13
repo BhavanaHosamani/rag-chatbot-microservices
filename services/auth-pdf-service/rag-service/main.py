@@ -60,7 +60,7 @@ def verify_token(authorization: str) -> dict:
 def get_embeddings():
     return OpenAIEmbeddings(
         model="openai/text-embedding-ada-002",
-        api_key=os.getenv("OPENAI_API_KEY"),
+        api_key=os.getenv("OPENROUTER_API_KEY"),
         base_url="https://openrouter.ai/api/v1",
     )
 

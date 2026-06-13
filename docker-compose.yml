@@ -1,30 +1,23 @@
-version: "3.9"
 
-# Shared environment variables across all services
+
 x-common-env: &common-env
   SUPABASE_URL: ${SUPABASE_URL}
   SUPABASE_SERVICE_KEY: ${SUPABASE_SERVICE_KEY}
   SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY}
-  OPENAI_API_KEY: ${OPENAI_API_KEY}
+  OPENAI_API_KEY: ${OPENROUTER_API_KEY}
 
 services:
 
-  # =========================
-  # Auth Service — port 8001
-  # =========================
   auth-service:
-    build: ./auth-service
+    build: ./services/auth-pdf-service/auth-service
     ports:
       - "8001:8001"
     environment:
       <<: *common-env
     restart: unless-stopped
 
-  # =========================
-  # PDF Service — port 8002
-  # =========================
   pdf-service:
-    build: ./pdf-service
+    build: ./services/auth-pdf-service/pdf-service
     ports:
       - "8002:8002"
     environment:
@@ -34,11 +27,8 @@ services:
       - auth-service
     restart: unless-stopped
 
-  # =========================
-  # RAG Service — port 8003
-  # =========================
   rag-service:
-    build: ./rag-service
+    build: ./services/auth-pdf-service/rag-service
     ports:
       - "8003:8003"
     environment:
@@ -50,11 +40,8 @@ services:
       - pdf-service
     restart: unless-stopped
 
-  # =========================
-  # Chat Service — port 8004
-  # =========================
   chat-service:
-    build: ./chat-service
+    build: ./services/auth-pdf-service/chat-service
     ports:
       - "8004:8004"
     environment:
@@ -66,9 +53,6 @@ services:
       - rag-service
     restart: unless-stopped
 
-  # =========================
-  # Frontend — port 8501
-  # =========================
   frontend:
     build: ./frontend
     ports:

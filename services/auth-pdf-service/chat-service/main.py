@@ -37,7 +37,7 @@ app.add_middleware(
 llm = ChatOpenAI(
     model="openai/gpt-4o-mini",
     temperature=0.7,
-    api_key=os.getenv("OPENAI_API_KEY"),
+    api_key=os.getenv("OPENROUTER_API_KEY"),
     base_url="https://openrouter.ai/api/v1",
 )
 

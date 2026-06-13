@@ -4,3 +4,11 @@ supabase
 python-multipart
 pydantic
 python-dotenv
+
+langchain
+langchain-community
+langchain-text-splitters
+langchain-openai
+chromadb
+openai
+httpx
